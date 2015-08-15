@@ -1,0 +1,91 @@
+#My config for parsing Palo Alto syslogs
+##This is a work in progress and incomplete.
+##Probably Doesn work out of the box because of stuff I've left out but should be enough to get people going
+
+##Good reference: https://live.paloaltonetworks.com/servlet/JiveServlet/previewBody/2021-102-8-13361/PANOS-Syslog-Integration-TN-RevM.pdf
+
+
+if [type] == "PA" {
+    mutate {
+      add_field => {
+        "syslog_message" => "%{message}"
+       }
+    }
+    grok {
+      match => { "syslog_message" => "^<%{POSINT:syslog_pri}>%{CISCOTIMESTAMP:syslog_timestamp} %{HOSTNAME} %{GREEDYDATA:message}" }
+      overwrite => [ "message" ]
+    }
+#    date {
+#      timezone => "US/Mountain"
+#      match => [ "receivedTime", "UNIX" ]
+#     add_field => [ "timeFix",  "true" ]
+#    }
+    syslog_pri {}
+}
+
+filter {
+  if [type] == "PA" {
+
+    grok {
+      match => { "message" => "^%{DATA},%{DATA},%{DATA},%{DATA:type}," }
+      overwrite => [ "type" ]
+    }
+    if [type] == "TRAFFIC" {
+      csv {
+        columns => [ "fu_traf1", "receive_time", "serial", "type", "subtype", "fu_traf2", "time_generated", "src", "dst", "natsrc", "natdst", "rule", "srcuser", "dstuser", "app", "vsys", "from", "to", "inbound_if", "outbound_if", "logset", "fu-traf3", "sessionid", "repeatcnt", "sport", "dport", "natsport", "natdport", "flags", "proto", "action", "bytes", "bytes_sent", "bytes_received", "packets", "start", "elapsed", "category", "fu_traff4", "seqno", "actionflags", "srcloc", "dstloc", "fu_traf5", "pkts_sent", "pkts_received", "session_end_reason"]
+      }
+
+
+      mutate {
+        #Create 5 tuple of srcIP:srcport,dstIP:dstport,protocol    (if 5 tuple really needed? would 4 tuple do the job?)
+        #Allows for the grouping of events for a connection
+        add_field => { "flowTuple" => "%{src}:%{sport},%{dst}:%{dport},%{proto}" }
+
+        #Create 2 tuple of srcIP:dstIP
+        #Allows for the tracking of connections between two hosts
+        add_field => { "hostTuple" => "%{src}:%{dst}" }
+      }
+
+#      mutate {
+#        convert => [ “Bytes”, “integer” ]
+#
+#      }
+
+
+
+    } elseif [type] == "THREAT" {
+      csv {
+        columns => [ "fu_threat1", "receive_time", "serial", "type", "subtype", "fu_threat2", "time_generated", "src", "dst", "natsrc", "natdst", "rule", "srcuser", "dstuser", "app", "vsys", "from", "to", "inbound_if", "outbound_if", "logset", "fu-threat3", "sessionid", "repeatcnt", "sport", "dport", "natsport", "natdport", "flags", "proto", "action", "misc", "threatid", "category", "severity", "direction", "seqno", "actionflags", "srcloc", "dstloc", "fu_threat5", "contenttype", "pcap_id", "filedigest", "cloud", "fu-threat6", "user_agent", "filetype", "xff", "referer", "sender", "subject", "recipient", "reportid"]
+      }
+
+	#Split up the threat description and the threat id
+      grok {
+        match => { "threatid" => "^%{DATA:threat_description}\(%{INT:threat_code}\)$" }
+      }
+
+      mutate {
+	#Create 5 tuple of srcIP:srcport,dstIP:dstport,protocol    (is 5 tuple really needed? would 4 tuple do the job?)
+	#Allows for the grouping of events for a connection
+        add_field => { "flowTuple" => "%{src}:%{sport},%{dst}:%{dport},%{proto}" }
+
+	#Create 2 tuple of srcIP:dstIP
+	#Allows for the tracking of connections between two hosts in one direction
+        add_field => { "hostTuple" => "%{src}:%{dst}" }
+      }
+
+    } elseif [type] == "HIPPPPP" {
+      csv {
+        columns => [ "fu_hip1", "receive_time", "serial", "type", "subtype", "fu_hip2", "time_generated", "srcuser", "vsys", "machinename", "OS", "src", "matchname", "repeatcnt", "matchtype", "fu-hip3", "fu-hip4", "seqno", "actionflags" ]
+      }
+    } elseif [type] == "CONFIG" {
+      csv {
+        columns => [ "fu_conf1", "receive_time", "serial", "type", "subtype", "fu_conf2", "time_generated", "host", "vsys", "cmd", "admin", "client", "result", "path", "seqno", "actionflags", "before_change_detail", "after_change_detail" ]
+      }
+    } elseif [type] == "SYSTEM" {
+      csv {
+        columns => [ "fu_sys1", "receive_time", "serial", "type", "subtype", "fu_sys2", "time_generated", "vsys", "eventid", "object", "fu_sys3", "fu_sys4", "module", "severity", "opaque", "seqno", "actionflags" ]
+      }
+    }
+    
+  }
+}
